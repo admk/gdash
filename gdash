@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+import sys
+import math
+import json
+
+import sh
+import tabulate
+
+
+def fetch_gpustat(servers):
+    results = {}
+    servers = list(reversed(servers))
+    while servers:
+        s = servers.pop()
+        try:
+            result = sh.ssh(s, '~/.local/bin/gpustat', '--json')
+        except sh.ErrorReturnCode_127:
+            sh.pip('install', '-h', 'gpustat')
+            servers.append(s)
+        results[s] = json.loads(result.stdout)
+    return results
+
+
+def gpu_name(name):
+    if 'V100' in name:
+        return 'v100'
+    if 'A100' in name:
+        return 'a100'
+    return '?'
+
+
+def indent(text, spaces=4):
+    return '\n'.join(spaces * ' ' + line for line in text.split('\n'))
+
+
+def unit(value):
+    units = 'MGTP'
+    base = math.floor(math.log(value, 1024))
+    value /= math.pow(1024, base)
+    return f'{value:5.2f}{units[base]}B'
+
+
+def format_processes(procs):
+    users = set(p['username'] for p in procs)
+    text = []
+    for u in users:
+        m = sum(p['gpu_memory_usage'] for p in procs if p['username'] == u)
+        text.append(f'{u}({unit(m).strip()})')
+    return ', '.join(text)
+
+
+def format_table(servers):
+    results = fetch_gpustat(servers)
+    lines = []
+    for server, server_result in results.items():
+        for gpu in server_result['gpus']:
+            line = [
+                f'{server}.{gpu["index"]}', gpu_name(gpu["name"]),
+                f'{gpu["utilization.gpu"]}%',
+                f'{unit(gpu["memory.used"])} / {unit(gpu["memory.total"])}',
+                format_processes(gpu["processes"])]
+            lines.append(line)
+    return lines
+
+
+def main():
+    servers = sys.argv[1:]
+    if not servers:
+        print('No servers specified.')
+        sys.exit(-1)
+    table = format_table(servers)
+    table = tabulate.tabulate(
+        table, headers=['Server', 'GPU', 'Usage', 'Memory', 'Users'])
+    print(table)
+
+
+if __name__ == '__main__':
+    main()
+
