@@ -15,7 +15,7 @@ def fetch_gpustat(servers):
         try:
             result = sh.ssh(s, '~/.local/bin/gpustat', '--json')
             results[s] = json.loads(result.stdout)
-        except Exception as e:
+        except sh.ErrorReturnCode as e:
             results[s] = {'error': e}
             # sh.ssh(
             #     s, '~/.local/bin/pip', 'install', '--user', 'gpustat',
@@ -29,15 +29,15 @@ def gpu_name(name):
         return 'v100'
     if 'A100' in name:
         return 'a100'
+    if '3080 Ti' in name:
+        return '3080ti'
+    if '3090' in name:
+        return '3090'
     return '?'
 
 
-def indent(text, spaces=4):
-    return '\n'.join(spaces * ' ' + line for line in text.split('\n'))
-
-
 def unit(value):
-    if value == 0:
+    if value < 1024:
         return '0MB'
     units = 'MGTP'
     base = math.floor(math.log(value, 1024))
@@ -61,13 +61,15 @@ def format_table(servers):
         if 'error' in server_result:
             error = server_result['error'].stderr.decode().splitlines()[-1]
             print(f'{server}: {error}')
-            lines.append([server, 'error', None, None, None])
+            lines.append([server, 'error'])
             continue
         for gpu in server_result['gpus']:
             line = [
-                f'{server}.{gpu["index"]}', gpu_name(gpu["name"]),
+                f'{server}.{gpu["index"]}',
+                gpu_name(gpu["name"]),
                 f'{gpu["utilization.gpu"]}%',
-                f'{unit(gpu["memory.used"])} / {unit(gpu["memory.total"])}',
+                f'{unit(gpu["memory.used"])}',
+                f'{unit(gpu["memory.total"])}',
                 format_processes(gpu["processes"])]
             lines.append(line)
     return lines
@@ -79,8 +81,9 @@ def main():
         print('No servers specified.')
         sys.exit(-1)
     table = format_table(servers)
-    table = tabulate.tabulate(
-        table, headers=['Server', 'GPU', 'Usage', 'Memory', 'Users'])
+    headers = ('Server', 'GPU', 'Usage', 'Used', 'Total', 'Users')
+    colalign = ('right', 'left') + ('right', ) * 3 + ('left', )
+    table = tabulate.tabulate(table, headers=headers, colalign=colalign)
     print(table)
 
 
