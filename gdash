@@ -14,10 +14,13 @@ def fetch_gpustat(servers):
         s = servers.pop()
         try:
             result = sh.ssh(s, '~/.local/bin/gpustat', '--json')
-        except sh.ErrorReturnCode_127:
-            sh.pip('install', '-h', 'gpustat')
-            servers.append(s)
-        results[s] = json.loads(result.stdout)
+            results[s] = json.loads(result.stdout)
+        except Exception as e:
+            results[s] = {'error': e}
+            # sh.ssh(
+            #     s, '~/.local/bin/pip', 'install', '--user', 'gpustat',
+            #     _out=sys.stdout)
+            # servers.append(s)
     return results
 
 
@@ -34,6 +37,8 @@ def indent(text, spaces=4):
 
 
 def unit(value):
+    if value == 0:
+        return '0MB'
     units = 'MGTP'
     base = math.floor(math.log(value, 1024))
     value /= math.pow(1024, base)
@@ -53,6 +58,11 @@ def format_table(servers):
     results = fetch_gpustat(servers)
     lines = []
     for server, server_result in results.items():
+        if 'error' in server_result:
+            error = server_result['error'].stderr.decode().splitlines()[-1]
+            print(f'{server}: {error}')
+            lines.append([server, 'error', None, None, None])
+            continue
         for gpu in server_result['gpus']:
             line = [
                 f'{server}.{gpu["index"]}', gpu_name(gpu["name"]),
