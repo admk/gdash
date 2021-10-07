@@ -3,6 +3,7 @@ import sys
 import math
 import json
 import subprocess
+from typing import Iterable, Mapping, Any, List
 
 import tabulate
 
@@ -10,24 +11,29 @@ import tabulate
 gpu_stat = '~/.local/bin/gpustat'
 
 
-def fetch(server):
+def fetch(server: str) -> 'subprocess.Popen[str]':
     return subprocess.Popen(
         ['ssh', server, gpu_stat, '--json'],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
 
-def fetch_all(servers):
-    procs = {}
-    results = {}
+ResultDict = Mapping[str, Any]
+
+
+def fetch_all(servers: Iterable[str]) -> Mapping[str, ResultDict]:
+    procs: Mapping[str, 'subprocess.Popen[str]'] = {}
+    results: Mapping[str, ResultDict] = {}
     for s in servers:
         procs[s] = fetch(s)
+    print('Finished: ', end='')
     for s, p in procs.items():
         try:
-            print(s)
+            print(s, end=' ')
+            sys.stdout.flush()
             stdout, stderr = p.communicate(timeout=10)
         except subprocess.TimeoutExpired as e:
             p.kill()
-            results[s] = {'error': e}
+            results[s] = {'error': str(e)}
             continue
         if p.returncode:
             results[s] = {
@@ -37,10 +43,11 @@ def fetch_all(servers):
             }
         else:
             results[s] = json.loads(stdout)
+    print('')
     return results
 
 
-def gpu_name(name):
+def gpu_name(name: str) -> str:
     if 'V100' in name:
         return 'v100'
     if 'A100' in name:
@@ -52,7 +59,7 @@ def gpu_name(name):
     return '?'
 
 
-def unit(value):
+def unit(value: float) -> str:
     if value < 1024:
         return '0MB'
     units = 'MGTP'
@@ -61,17 +68,17 @@ def unit(value):
     return f'{value:5.2f}{units[base]}B'
 
 
-def format_processes(procs):
+def format_processes(procs: Iterable[ResultDict]):
     users = set(p['username'] for p in procs)
-    text = []
+    text: List[str] = []
     for u in users:
         m = sum(p['gpu_memory_usage'] for p in procs if p['username'] == u)
         text.append(f'{u}({unit(m).strip()})')
     return ', '.join(text)
 
 
-def format_table(results):
-    lines = []
+def format_table(results: Mapping[str, ResultDict]) -> List[List[str]]:
+    lines: List[List[str]] = []
     for server, server_result in results.items():
         if 'error' in server_result:
             # error = stderr.decode().splitlines()[-1]
@@ -83,7 +90,7 @@ def format_table(results):
             # lines.append([server, 'error'])
             continue
         for gpu in server_result['gpus']:
-            line = [
+            line: List[str] = [
                 f'{server}.{gpu["index"]}',
                 gpu_name(gpu["name"]),
                 f'{gpu["utilization.gpu"]}%',
@@ -105,10 +112,8 @@ def main():
         return
     headers = ('Server', 'GPU', 'Usage', 'Used', 'Total', 'Users')
     colalign = ('right', 'left') + ('right', ) * 3 + ('left', )
-    table = tabulate.tabulate(table, headers=headers, colalign=colalign)
-    print(table)
+    return tabulate.tabulate(table, headers=headers, colalign=colalign)
 
 
 if __name__ == '__main__':
-    main()
-
+    print(main())
